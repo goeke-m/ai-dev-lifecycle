@@ -1,0 +1,166 @@
+name: Test TypeScript
+
+# Reusable workflow — call from consuming repos:
+#
+#   jobs:
+#     test:
+#       uses: goeke-m/dev-lifecycle/.github/workflows/test-typescript.yml@main
+#       with:
+#         node-version: '22'
+#         package-manager: 'npm'
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: 'The Node.js version to use (e.g., 22, 22.x, lts/*)'
+        type: string
+        default: '22'
+        required: false
+
+      package-manager:
+        description: 'Package manager to use: npm, pnpm, or yarn'
+        type: string
+        default: 'npm'
+        required: false
+
+      test-command:
+        description: 'The test script to run (without coverage)'
+        type: string
+        default: 'test'
+        required: false
+
+      coverage-command:
+        description: 'The test script to run with coverage'
+        type: string
+        default: 'test:coverage'
+        required: false
+
+      coverage-threshold-lines:
+        description: 'Minimum line coverage percentage (0–100)'
+        type: number
+        default: 80
+        required: false
+
+      coverage-threshold-branches:
+        description: 'Minimum branch coverage percentage (0–100)'
+        type: number
+        default: 75
+        required: false
+
+      upload-coverage:
+        description: 'Whether to upload the coverage report artifact'
+        type: boolean
+        default: true
+        required: false
+
+    outputs:
+      coverage-artifact-name:
+        description: 'Name of the uploaded coverage artifact'
+        value: ${{ jobs.test.outputs.coverage-artifact }}
+
+jobs:
+  test:
+    name: Test (Node ${{ inputs.node-version }})
+    runs-on: ubuntu-latest
+    outputs:
+      coverage-artifact: coverage-report-ts
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js ${{ inputs.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: ${{ inputs.package-manager }}
+
+      - name: Set up pnpm
+        if: ${{ inputs.package-manager == 'pnpm' }}
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Install dependencies (npm)
+        if: ${{ inputs.package-manager == 'npm' }}
+        run: npm ci
+
+      - name: Install dependencies (pnpm)
+        if: ${{ inputs.package-manager == 'pnpm' }}
+        run: pnpm install --frozen-lockfile
+
+      - name: Install dependencies (yarn)
+        if: ${{ inputs.package-manager == 'yarn' }}
+        run: yarn install --immutable
+
+      - name: Run tests with coverage
+        run: ${{ inputs.package-manager }} run ${{ inputs.coverage-command }}
+        env:
+          CI: 'true'
+
+      - name: Check coverage thresholds
+        if: always()
+        run: |
+          COVERAGE_JSON="./coverage/coverage-summary.json"
+
+          if [ ! -f "$COVERAGE_JSON" ]; then
+            echo "::warning::Coverage summary not found at $COVERAGE_JSON — skipping threshold check"
+            echo "Ensure vitest is configured with reporter: ['json'], reportsDirectory: './coverage'"
+            exit 0
+          fi
+
+          # Extract line and branch coverage from the JSON summary
+          LINES=$(node -e "
+            const c = require('$COVERAGE_JSON');
+            const total = c.total;
+            if (!total) { console.log('0'); process.exit(0); }
+            console.log(total.lines.pct.toFixed(1));
+          ")
+          BRANCHES=$(node -e "
+            const c = require('$COVERAGE_JSON');
+            const total = c.total;
+            if (!total) { console.log('0'); process.exit(0); }
+            console.log(total.branches.pct.toFixed(1));
+          ")
+
+          LINE_THRESHOLD="${{ inputs.coverage-threshold-lines }}"
+          BRANCH_THRESHOLD="${{ inputs.coverage-threshold-branches }}"
+          FAIL=0
+
+          echo "Line coverage   : ${LINES}% (threshold: ${LINE_THRESHOLD}%)"
+          echo "Branch coverage : ${BRANCHES}% (threshold: ${BRANCH_THRESHOLD}%)"
+
+          if (( $(echo "$LINES < $LINE_THRESHOLD" | bc -l) )); then
+            echo "::error::Line coverage ${LINES}% is below the required ${LINE_THRESHOLD}%"
+            FAIL=1
+          fi
+
+          if (( $(echo "$BRANCHES < $BRANCH_THRESHOLD" | bc -l) )); then
+            echo "::error::Branch coverage ${BRANCHES}% is below the required ${BRANCH_THRESHOLD}%"
+            FAIL=1
+          fi
+
+          if [ "$FAIL" -eq 1 ]; then
+            exit 1
+          fi
+
+          echo "All coverage thresholds met."
+
+      - name: Upload coverage report
+        if: always() && inputs.upload-coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report-ts
+          path: coverage/
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-ts
+          path: test-results/
+          retention-days: 7
+          if-no-files-found: ignore

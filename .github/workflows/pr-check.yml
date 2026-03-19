@@ -1,0 +1,165 @@
+name: PR Check
+
+# Reusable workflow for pull request validation.
+# Call from consuming repos on the pull_request event:
+#
+#   jobs:
+#     pr-check:
+#       uses: goeke-m/dev-lifecycle/.github/workflows/pr-check.yml@main
+#       with:
+#         require-description: true
+
+on:
+  workflow_call:
+    inputs:
+      require-description:
+        description: >
+          Whether to fail if the PR body is empty or only contains the
+          unmodified PR template.
+        type: boolean
+        default: true
+        required: false
+
+      min-description-length:
+        description: 'Minimum number of non-whitespace characters required in the PR body'
+        type: number
+        default: 50
+        required: false
+
+      conventional-commits-types:
+        description: >
+          Comma-separated list of allowed Conventional Commits types.
+          Defaults to the standard set.
+        type: string
+        default: 'feat,fix,docs,style,refactor,test,chore,ci,build,perf,revert'
+        required: false
+
+    outputs:
+      title-valid:
+        description: 'Whether the PR title is valid'
+        value: ${{ jobs.validate-title.outputs.valid }}
+
+jobs:
+  # ── Validate PR title (Conventional Commits) ────────────────────────────────
+  validate-title:
+    name: Validate PR title
+    runs-on: ubuntu-latest
+    outputs:
+      valid: ${{ steps.check.outputs.valid }}
+
+    steps:
+      - name: Check PR title format
+        id: check
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          ALLOWED_TYPES: ${{ inputs.conventional-commits-types }}
+        run: |
+          echo "PR title: $PR_TITLE"
+
+          # Build the type alternation pattern from the comma-separated input
+          TYPE_PATTERN="$(echo "$ALLOWED_TYPES" | tr ',' '|')"
+
+          # Conventional Commits pattern (matches the commit-msg hook pattern)
+          # type(optional-scope)!: description (1-100 chars)
+          PATTERN="^($TYPE_PATTERN)(\([a-z0-9][a-z0-9 _-]*\))?(!)?: .{1,100}$"
+
+          if echo "$PR_TITLE" | grep -qE "$PATTERN"; then
+            echo "valid=true" >> "$GITHUB_OUTPUT"
+            echo "PR title is valid: $PR_TITLE"
+          else
+            echo "valid=false" >> "$GITHUB_OUTPUT"
+            echo "::error::PR title does not follow Conventional Commits format."
+            echo ""
+            echo "Your title: $PR_TITLE"
+            echo ""
+            echo "Required format: <type>[optional scope]: <description>"
+            echo ""
+            echo "Allowed types: $(echo "$ALLOWED_TYPES" | tr ',' ', ')"
+            echo ""
+            echo "Examples:"
+            echo "  feat: add user authentication"
+            echo "  fix(api): return 404 for missing resources"
+            echo "  chore(deps): bump typescript from 5.3 to 5.4"
+            echo "  feat(auth)!: replace JWT with session tokens"
+            echo ""
+            echo "Reference: https://www.conventionalcommits.org/en/v1.0.0/"
+            exit 1
+          fi
+
+  # ── Validate PR description ─────────────────────────────────────────────────
+  validate-description:
+    name: Validate PR description
+    runs-on: ubuntu-latest
+    if: ${{ inputs.require-description }}
+
+    steps:
+      - name: Check PR description is not empty
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          MIN_LENGTH: ${{ inputs.min-description-length }}
+        run: |
+          if [ -z "$PR_BODY" ]; then
+            echo "::error::PR description is empty. Please fill out the pull request template."
+            exit 1
+          fi
+
+          # Strip template comment placeholders and whitespace
+          STRIPPED="$(echo "$PR_BODY" | sed '/^<!--/,/-->/d' | tr -d '[:space:]')"
+
+          if [ "${#STRIPPED}" -lt "$MIN_LENGTH" ]; then
+            echo "::error::PR description is too short (${#STRIPPED} meaningful chars, minimum: $MIN_LENGTH)."
+            echo "Please provide a meaningful description of your changes."
+            exit 1
+          fi
+
+          echo "PR description is sufficient (${#STRIPPED} meaningful chars)."
+
+  # ── Check for linked issue ──────────────────────────────────────────────────
+  check-linked-issue:
+    name: Check for linked issue
+    runs-on: ubuntu-latest
+    # This is a warning only — it does not fail the check
+    continue-on-error: true
+
+    steps:
+      - name: Look for issue reference in PR body
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          # Look for common GitHub issue linking keywords followed by a number
+          ISSUE_PATTERN="(closes|fixes|resolves|relates to|ref|see) #[0-9]+"
+
+          if echo "$PR_BODY" | grep -iqE "$ISSUE_PATTERN"; then
+            echo "Issue reference found in PR body."
+          else
+            echo "::warning::No issue reference found in the PR description."
+            echo "Consider linking to an issue with 'Closes #123' or 'Fixes #123' in the body."
+          fi
+
+  # ── Check PR size ───────────────────────────────────────────────────────────
+  check-pr-size:
+    name: Check PR size
+    runs-on: ubuntu-latest
+    # This is a warning only — it does not fail the check
+    continue-on-error: true
+
+    steps:
+      - name: Check changed lines count
+        env:
+          ADDITIONS: ${{ github.event.pull_request.additions }}
+          DELETIONS: ${{ github.event.pull_request.deletions }}
+        run: |
+          TOTAL=$(( ADDITIONS + DELETIONS ))
+
+          echo "Lines added   : $ADDITIONS"
+          echo "Lines removed : $DELETIONS"
+          echo "Total changes : $TOTAL"
+
+          if [ "$TOTAL" -gt 800 ]; then
+            echo "::warning::This PR changes $TOTAL lines. PRs over 800 lines are difficult to review."
+            echo "Consider splitting into smaller, focused PRs if possible."
+          elif [ "$TOTAL" -gt 400 ]; then
+            echo "::notice::This PR changes $TOTAL lines. Consider whether it can be split."
+          else
+            echo "PR size is within the recommended range."
+          fi

@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# -----------------------------------------------------------------------------
+# commit-msg hook — Enforce Conventional Commits format
+#
+# Managed by dev-lifecycle (https://github.com/goeke-m/dev-lifecycle)
+# Spec: https://www.conventionalcommits.org/en/v1.0.0/
+# -----------------------------------------------------------------------------
+
+COMMIT_MSG_FILE="${1}"
+COMMIT_MSG="$(cat "$COMMIT_MSG_FILE")"
+
+# Strip comment lines (lines starting with #) and trailing whitespace
+COMMIT_MSG_CLEANED="$(echo "$COMMIT_MSG" | grep -v '^#' | sed 's/[[:space:]]*$//' | head -1)"
+
+# Conventional Commits pattern:
+# type(optional-scope): description
+# - type       : feat|fix|docs|style|refactor|test|chore|ci|build|perf|revert
+# - scope      : optional, wrapped in parentheses, lowercase, may contain hyphens
+# - description: 1–100 characters, must not be empty
+PATTERN='^(feat|fix|docs|style|refactor|test|chore|ci|build|perf|revert)(\([a-z0-9][a-z0-9 _-]*\))?(!)?: .{1,100}$'
+
+if echo "$COMMIT_MSG_CLEANED" | grep -qE "$PATTERN"; then
+  exit 0
+fi
+
+# ── Validation failed — print a helpful error ────────────────────────────────
+echo ""
+echo "╔══════════════════════════════════════════════════════════════════════╗"
+echo "║           commit-msg: Conventional Commits format required           ║"
+echo "╚══════════════════════════════════════════════════════════════════════╝"
+echo ""
+echo "  Your commit message:"
+echo "    ${COMMIT_MSG_CLEANED}"
+echo ""
+echo "  Required format:"
+echo "    <type>[optional scope]: <description>"
+echo ""
+echo "  Allowed types:"
+echo "    feat      — A new feature"
+echo "    fix       — A bug fix"
+echo "    docs      — Documentation changes only"
+echo "    style     — Code style changes (formatting, whitespace, etc.)"
+echo "    refactor  — Code change that is neither a bug fix nor a new feature"
+echo "    test      — Adding or updating tests"
+echo "    chore     — Build process, tooling, or dependency updates"
+echo "    ci        — Changes to CI/CD configuration"
+echo "    build     — Changes to the build system"
+echo "    perf      — Performance improvements"
+echo "    revert    — Reverting a previous commit"
+echo ""
+echo "  Optional scope (in parentheses, lowercase):"
+echo "    feat(auth): add OAuth2 support"
+echo "    fix(api): handle null response from upstream"
+echo ""
+echo "  Breaking changes — append '!' before the colon:"
+echo "    feat(api)!: remove deprecated endpoints"
+echo ""
+echo "  Examples:"
+echo "    feat: add user authentication"
+echo "    fix(database): prevent SQL injection in search query"
+echo "    docs: update README with new setup instructions"
+echo "    chore(deps): bump typescript from 5.3 to 5.4"
+echo "    refactor(auth)!: replace JWT with session tokens"
+echo ""
+echo "  Rules:"
+echo "    - Description must be 1–100 characters"
+echo "    - Use present tense ('add' not 'added')"
+echo "    - Do not end the description with a period"
+echo "    - Do not capitalize the first letter of the description"
+echo ""
+echo "  Reference: https://www.conventionalcommits.org/en/v1.0.0/"
+echo ""
+exit 1

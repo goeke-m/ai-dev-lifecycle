@@ -1,0 +1,464 @@
+# dev-lifecycle
+
+A cross-platform development lifecycle management system for C# and TypeScript projects. Provides a single source of truth for coding standards, git hooks, PR templates, test configuration, documentation templates, and AI agent instructions across all your repositories.
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+---
+
+## What This Is
+
+`dev-lifecycle` is a meta-repository that you clone once to your machine (or to a CI runner) and then "apply" to each of your projects. Applying it:
+
+- **Symlinks** configuration files (`.editorconfig`, `eslint.config.js`, `tsconfig.base.json`, etc.) from the lifecycle repo into your project root, so updates propagate automatically
+- **Installs** git hooks (`pre-commit`, `commit-msg`) that enforce code quality and Conventional Commits before a commit is recorded
+- **Generates** AI agent instruction files (`CLAUDE.md`, `copilot-instructions.md`, `.cursor/rules/lifecycle.mdc`) tailored to your project's language and enabled rule sets
+- **Registers** your project so the daily auto-update script can re-apply changes after pulling new lifecycle versions
+- **Installs** a cron job (Linux/macOS) or Task Scheduler task (Windows) that pulls updates every morning and re-applies to all registered projects
+
+---
+
+## Prerequisites
+
+| Tool | Version | Purpose |
+|------|---------|---------|
+| `git` | 2.40+ | Cloning and hooks |
+| `jq` | 1.6+ | JSON config parsing in bash scripts |
+| `bash` | 4.0+ (macOS: install via Homebrew) | `apply.sh`, `update.sh`, hooks |
+| `PowerShell` | 7.4+ | `apply.ps1`, `update.ps1` (Windows) |
+| `dotnet` | 9.0 SDK | C# format checks in `pre-commit` hook |
+| `node` + `npm` | Node 22+, npm 10+ | `lint-staged` in `pre-commit` hook (TypeScript projects) |
+
+### Install jq
+
+```bash
+# macOS
+brew install jq
+
+# Debian / Ubuntu
+sudo apt-get install jq
+
+# Fedora / RHEL
+sudo dnf install jq
+
+# Windows (winget)
+winget install jqlang.jq
+```
+
+---
+
+## Setup
+
+### 1. Clone to `~/.dev-lifecycle`
+
+The default location for the lifecycle repo is `~/.dev-lifecycle`. All scripts default to this path, but you can override it via the `LIFECYCLE_DIR` environment variable.
+
+```bash
+git clone https://github.com/goeke-m/dev-lifecycle.git ~/.dev-lifecycle
+```
+
+**Windows (PowerShell):**
+
+```powershell
+git clone https://github.com/goeke-m/dev-lifecycle.git "$HOME\.dev-lifecycle"
+```
+
+---
+
+## Adding to a Project
+
+### 1. Create `.devlifecycle.json` in the project root
+
+Copy the example config and edit it to enable the modules, hooks, and agents you want:
+
+```bash
+cp ~/.dev-lifecycle/.devlifecycle.example.json myproject/.devlifecycle.json
+```
+
+See the [Config Reference](#config-reference) section for all available options.
+
+### 2. Run `apply.sh` (Linux / macOS)
+
+```bash
+# Apply to the current directory
+bash ~/.dev-lifecycle/scripts/apply.sh
+
+# Apply to a specific project
+bash ~/.dev-lifecycle/scripts/apply.sh /path/to/myproject
+
+# Override the lifecycle directory
+LIFECYCLE_DIR=/opt/dev-lifecycle bash /opt/dev-lifecycle/scripts/apply.sh
+```
+
+### 2. Run `apply.ps1` (Windows)
+
+Open PowerShell 7 as your normal user (Developer Mode enables symlinks without requiring admin):
+
+```powershell
+# Apply to the current directory
+& "$HOME\.dev-lifecycle\scripts\apply.ps1"
+
+# Apply to a specific project
+& "$HOME\.dev-lifecycle\scripts\apply.ps1" -ProjectDir C:\Projects\myproject
+```
+
+> **Windows symlinks:** Symbolic links require either Developer Mode (Settings > System > For developers) or running as Administrator. If neither is available, `apply.ps1` falls back to copying files — updates will not propagate automatically.
+
+### What `apply` does
+
+For each enabled module, it symlinks the relevant files into your project. Then it:
+
+1. Installs git hooks as symlinks in `.git/hooks/`
+2. Generates agent instruction files (CLAUDE.md, copilot-instructions.md, etc.)
+3. Registers your project path in `~/.dev-lifecycle/.registered-projects`
+4. Installs a cron job / Task Scheduler task for daily auto-updates
+
+After running `apply`, you should see the following new files/symlinks in your project (depending on your config):
+
+```
+myproject/
+├── .editorconfig              ← symlink → ~/.dev-lifecycle/modules/coding-standards/csharp/.editorconfig
+├── Directory.Build.props      ← symlink → ~/.dev-lifecycle/modules/coding-standards/csharp/Directory.Build.props
+├── Directory.Packages.props   ← symlink → ~/.dev-lifecycle/modules/scaffolding/csharp/Directory.Packages.props
+├── coverlet.runsettings       ← symlink → ~/.dev-lifecycle/modules/testing/csharp/coverlet.runsettings
+├── .github/
+│   └── PULL_REQUEST_TEMPLATE.md ← symlink → ~/.dev-lifecycle/modules/pr-workflows/github/...
+├── docs/
+│   └── templates/
+│       ├── README.md          ← symlink
+│       ├── ADR.md             ← symlink
+│       └── CHANGELOG.md       ← symlink
+├── CLAUDE.md                  ← generated by generate-agent.sh
+└── .github/
+    └── copilot-instructions.md ← generated
+```
+
+---
+
+## Config Reference
+
+The `.devlifecycle.json` file controls everything `apply` does. See `.devlifecycle.example.json` for the full example.
+
+### `project`
+
+```json
+"project": {
+  "name": "my-project",
+  "language": "csharp",        // "csharp" | "typescript"
+  "description": "..."
+}
+```
+
+### `modules`
+
+Each module can be independently enabled or disabled.
+
+| Module | What it provides |
+|--------|-----------------|
+| `coding-standards` | `.editorconfig` (C#), `Directory.Build.props` (C#), `eslint.config.js`, `.prettierrc`, `tsconfig.base.json` (TypeScript) |
+| `scaffolding` | `Directory.Packages.props` (C# CPM), `package.base.json` (TypeScript) |
+| `pr-workflows` | `.github/PULL_REQUEST_TEMPLATE.md` |
+| `testing` | `coverlet.runsettings` (C#), `vitest.config.base.ts` (TypeScript) |
+| `documentation` | `docs/templates/README.md`, `docs/templates/ADR.md`, `docs/templates/CHANGELOG.md` |
+
+```json
+"modules": {
+  "coding-standards": { "enabled": true },
+  "scaffolding":       { "enabled": true },
+  "pr-workflows":      { "enabled": true },
+  "testing":           { "enabled": true },
+  "documentation":     { "enabled": true }
+}
+```
+
+### `hooks`
+
+```json
+"hooks": {
+  "pre-commit": { "enabled": true },
+  "commit-msg":  { "enabled": true }
+}
+```
+
+| Hook | What it does |
+|------|-------------|
+| `pre-commit` | Runs `lint-staged` for TypeScript/JS files if configured; runs `dotnet format --verify-no-changes` for staged `.cs` files |
+| `commit-msg` | Validates that the commit message follows Conventional Commits format |
+
+### `agents`
+
+```json
+"agents": {
+  "claude": {
+    "enabled": true,
+    "rules": ["git-commits", "pr-standards", "testing", "csharp-conventions"]
+  },
+  "copilot": {
+    "enabled": true,
+    "rules": ["git-commits", "pr-standards", "testing", "csharp-conventions"]
+  },
+  "cursor": {
+    "enabled": false,
+    "rules": ["git-commits", "pr-standards", "testing", "csharp-conventions"]
+  }
+}
+```
+
+Available rule files (in `agents/rules/`):
+
+| Rule file | Contents |
+|-----------|---------|
+| `git-commits.md` | Conventional Commits specification, types, examples, and anti-patterns |
+| `pr-standards.md` | PR size guidance, description requirements, review expectations, merge strategy |
+| `testing.md` | Test naming, coverage expectations, mocking guidance, anti-patterns |
+| `csharp-conventions.md` | Naming, record types, async/await, null handling, LINQ, DI, logging |
+| `typescript-conventions.md` | Types vs interfaces, no-any, async/await, error handling, imports, immutability |
+
+### `ci`
+
+```json
+"ci": {
+  "github": {
+    "enabled": true,
+    "workflows": {
+      "build": true,
+      "test": true,
+      "prCheck": true,
+      "lifecycleUpdate": true
+    },
+    "inputs": {
+      "dotnetVersion": "9.0.x",
+      "nodeVersion": "22",
+      "packageManager": "npm",
+      "configuration": "Release",
+      "projectPath": "src/MyProject/MyProject.csproj"
+    }
+  }
+}
+```
+
+---
+
+## Module Descriptions
+
+### `coding-standards`
+
+Provides configuration files that enforce consistent code style across all developers and CI.
+
+**C# files:**
+- `.editorconfig` — 200+ rules covering indentation, naming, code style, null patterns, LINQ, expression bodies, and analyzer severity settings. Aligns with Microsoft's style guidelines.
+- `Directory.Build.props` — MSBuild properties applied to all projects: nullable enabled, implicit usings, TreatWarningsAsErrors in CI, StyleCop and SonarAnalyzers configured, deterministic builds.
+
+**TypeScript files:**
+- `eslint.config.js` — ESLint v9 flat config with `typescript-eslint` recommended + type-checked rules, prettier integration, and sensible rule overrides including no-any, no-floating-promises, consistent-type-imports.
+- `.prettierrc` — `printWidth: 100`, `singleQuote: true`, `trailingComma: 'all'`, `semi: true`, with per-file-extension overrides.
+- `tsconfig.base.json` — Strict TypeScript config targeting ES2022 with `noUncheckedIndexedAccess`, `useUnknownInCatchVariables`, `verbatimModuleSyntax`, and incremental compilation.
+
+### `scaffolding`
+
+Provides starting-point configuration for new projects.
+
+- `Directory.Packages.props` — Central Package Management for NuGet with recent versions of xUnit, FluentAssertions, NSubstitute, Bogus, AutoFixture, Microsoft.Extensions.* (DI, configuration, logging, caching, hosting), OpenTelemetry, Polly, and analyzers.
+- `package.base.json` — Base `package.json` with standard `devDependencies` (typescript, eslint, prettier, vitest, @types/node) and npm scripts (build, test, lint, format, coverage).
+
+### `pr-workflows`
+
+- `PULL_REQUEST_TEMPLATE.md` — Comprehensive GitHub PR template with Summary, Motivation, Type of Change checkboxes, Changes list, Testing section with manual test steps, and a Checklist covering coding standards, test coverage, documentation, dependencies, and breaking changes.
+
+### `testing`
+
+- `coverlet.runsettings` — Cobertura output format, exclusions for test projects/migrations/generated code, 80% line coverage threshold, support for multi-project merging.
+- `vitest.config.base.ts` — Base Vitest config with v8 coverage, configurable thresholds (lines: 80%, branches: 75%, functions: 80%), multiple reporters (text, cobertura, HTML, lcov), CI-aware parallelism, and a `mergeConfig` usage pattern.
+
+### `documentation`
+
+- `README.md` template — Full structure with badges, prerequisites, installation, configuration table, usage, development commands, project structure, architecture section, contributing guide, and license.
+- `ADR.md` template — Michael Nygard format with Context, Decision, Alternatives Considered, Consequences (positive/negative/risks), Implementation Notes, and References sections.
+- `CHANGELOG.md` template — Keep a Changelog 1.1.0 format with an [Unreleased] section, version comparison links, and instructions for maintainers.
+
+---
+
+## Agent Instructions
+
+When an agent is enabled in `.devlifecycle.json`, `apply.sh` runs `generate-agent.sh` which:
+
+1. Reads the `rules` list for that agent from the config
+2. Concatenates the corresponding files from `agents/rules/`
+3. Injects the result into the agent's template from `agents/<agent>/template.md`
+4. Substitutes placeholders: `{{PROJECT_NAME}}`, `{{LANGUAGE}}`, `{{ENABLED_MODULES}}`, `{{BUILD_CMD}}`, `{{TEST_CMD}}`, `{{LINT_CMD}}`, `{{RULES_CONTENT}}`
+5. Writes the output with a "do not edit manually" header to the correct location
+
+| Agent | Output path |
+|-------|-------------|
+| `claude` | `CLAUDE.md` |
+| `copilot` | `.github/copilot-instructions.md` |
+| `cursor` | `.cursor/rules/lifecycle.mdc` |
+
+The generated files are checked in to your repository so team members and CI do not need the lifecycle repo installed. Re-run `apply.sh` or the `lifecycle-update` CI workflow to regenerate them after a lifecycle update.
+
+---
+
+## CI/CD Integration
+
+### Using reusable workflows
+
+All workflows in `.github/workflows/` are designed as [reusable workflows](https://docs.github.com/en/actions/sharing-automations/reusing-workflows). Call them from your consuming repo:
+
+**Build a C# project:**
+
+```yaml
+jobs:
+  build:
+    uses: goeke-m/dev-lifecycle/.github/workflows/build-csharp.yml@main
+    with:
+      dotnet-version: '9.0.x'
+      project-path: 'src/MyProject/MyProject.csproj'
+      configuration: Release
+```
+
+**Test a C# project with coverage:**
+
+```yaml
+jobs:
+  test:
+    uses: goeke-m/dev-lifecycle/.github/workflows/test-csharp.yml@main
+    with:
+      dotnet-version: '9.0.x'
+      project-path: 'tests/'
+      coverage-threshold: 80
+```
+
+**Build a TypeScript project:**
+
+```yaml
+jobs:
+  build:
+    uses: goeke-m/dev-lifecycle/.github/workflows/build-typescript.yml@main
+    with:
+      node-version: '22'
+      package-manager: 'npm'
+```
+
+**Validate PR title and description:**
+
+```yaml
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+jobs:
+  pr-check:
+    uses: goeke-m/dev-lifecycle/.github/workflows/pr-check.yml@main
+    with:
+      require-description: true
+      min-description-length: 50
+```
+
+**Check for lifecycle drift on a schedule:**
+
+```yaml
+on:
+  schedule:
+    - cron: '0 9 * * 1'  # Every Monday at 9am UTC
+  workflow_dispatch:
+
+jobs:
+  lifecycle-update:
+    uses: goeke-m/dev-lifecycle/.github/workflows/lifecycle-update.yml@main
+    with:
+      project-language: csharp
+      enabled-modules: 'coding-standards,pr-workflows,testing'
+      enabled-agents: 'claude,copilot'
+```
+
+### Using the composite action
+
+The `setup-lifecycle` composite action checks out the lifecycle repo in CI so scripts can be run:
+
+```yaml
+steps:
+  - uses: actions/checkout@v4
+  - uses: goeke-m/dev-lifecycle/.github/actions/setup-lifecycle@main
+    with:
+      lifecycle-ref: main
+  - run: bash $LIFECYCLE_DIR/scripts/generate-agent.sh claude . .devlifecycle.json
+```
+
+---
+
+## Auto-Update Mechanism
+
+### How it works
+
+1. `apply.sh` registers your project path in `~/.dev-lifecycle/.registered-projects`
+2. `apply.sh` installs a cron job (Linux/macOS) or Task Scheduler task (Windows) that runs `update.sh` / `update.ps1` daily at 8am
+3. `update.sh` does `git pull --ff-only` on the lifecycle repo, then re-runs `apply.sh` for every registered project
+4. Since module files are symlinks, changes to the lifecycle repo are immediately reflected in all projects — no re-apply needed for symlinked files
+5. Re-applying is needed to regenerate agent instruction files (`CLAUDE.md`, etc.) when templates or rules change
+
+### Manual update
+
+```bash
+# Update all registered projects
+bash ~/.dev-lifecycle/scripts/update.sh
+
+# Check the update log
+tail -50 ~/.dev-lifecycle/update.log
+```
+
+### CI-based update
+
+For projects where you want the team to be notified of lifecycle updates (rather than relying on each developer's local cron job), use the `lifecycle-update` reusable workflow. It creates a PR when drift is detected, giving the team visibility and a review step before changes are merged.
+
+---
+
+## Contributing
+
+Contributions are welcome. Before opening a PR:
+
+1. Fork the repository and create a feature branch: `git checkout -b feat/<short-description>`
+2. Follow the conventions in `agents/rules/` — this repo eats its own dog food
+3. Test your changes:
+   - Run `bash scripts/apply.sh` against a test project to verify the apply flow
+   - Test hooks manually or with `bash hooks/commit-msg test-message-here`
+4. Commit using Conventional Commits (`feat:`, `fix:`, `chore:`, etc.)
+5. Open a PR using the template in `.github/PULL_REQUEST_TEMPLATE.md`
+
+### Adding a new module
+
+1. Create `modules/<module-name>/<language>/` with the files to be managed
+2. Add a case in the `apply.sh` `case` statement if the module has special placement logic (like `pr-workflows` or `documentation`)
+3. Do the same in `apply.ps1`
+4. Document the module in this README
+
+### Adding a new rule file
+
+1. Add `agents/rules/<rule-name>.md` with the rule content
+2. Update the `agents` section of `.devlifecycle.example.json` to include the new rule
+3. Document the rule in this README
+
+### Adding a new agent
+
+1. Create `agents/<agent-name>/template.md` with the agent's template (use `{{RULES_CONTENT}}` and other placeholders)
+2. Add the output path case to `generate-agent.sh` and `generate-agent.ps1`
+3. Add the agent to `.devlifecycle.example.json`
+4. Document the agent in this README
+
+---
+
+## File Permissions
+
+Git does not track executable bits on Windows. After cloning on Linux/macOS, mark hook files as executable:
+
+```bash
+chmod +x ~/.dev-lifecycle/hooks/*
+chmod +x ~/.dev-lifecycle/scripts/*.sh
+```
+
+`apply.sh` does this automatically when it symlinks hooks into `.git/hooks/`.
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).

@@ -1,0 +1,114 @@
+<Project>
+  <!--
+    Directory.Packages.props — Central Package Management (CPM)
+    Managed by dev-lifecycle (https://github.com/goeke-m/dev-lifecycle)
+
+    CPM documentation: https://learn.microsoft.com/en-us/nuget/consume-packages/central-package-management
+
+    With CPM enabled, all <PackageReference> items in project files must omit
+    the Version attribute — versions are managed exclusively here.
+  -->
+
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <!-- Ensure transitive dependencies also use the pinned versions -->
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+  </PropertyGroup>
+
+  <ItemGroup Label="Testing">
+    <!-- xUnit v2 test framework -->
+    <PackageVersion Include="xunit"                                           Version="2.9.3" />
+    <PackageVersion Include="xunit.runner.visualstudio"                       Version="2.8.2" />
+    <PackageVersion Include="xunit.analyzers"                                 Version="1.20.0" />
+
+    <!-- Microsoft Test SDK (required for dotnet test) -->
+    <PackageVersion Include="Microsoft.NET.Test.Sdk"                          Version="17.12.0" />
+
+    <!-- Coverlet for code coverage -->
+    <PackageVersion Include="coverlet.collector"                              Version="6.0.4" />
+    <PackageVersion Include="coverlet.msbuild"                                Version="6.0.4" />
+
+    <!-- FluentAssertions — expressive assertion library -->
+    <PackageVersion Include="FluentAssertions"                                Version="7.2.0" />
+
+    <!-- NSubstitute — lightweight mocking library -->
+    <PackageVersion Include="NSubstitute"                                     Version="5.3.0" />
+    <PackageVersion Include="NSubstitute.Analyzers.CSharp"                    Version="1.0.17" />
+
+    <!-- Bogus — fake data generator for test fixtures -->
+    <PackageVersion Include="Bogus"                                           Version="35.6.2" />
+
+    <!-- AutoFixture — auto-generate test objects -->
+    <PackageVersion Include="AutoFixture"                                     Version="4.18.1" />
+    <PackageVersion Include="AutoFixture.AutoNSubstitute"                     Version="4.18.1" />
+    <PackageVersion Include="AutoFixture.Xunit2"                              Version="4.18.1" />
+  </ItemGroup>
+
+  <ItemGroup Label="Microsoft.Extensions">
+    <!-- Dependency Injection -->
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection"        Version="9.0.3" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.3" />
+
+    <!-- Configuration -->
+    <PackageVersion Include="Microsoft.Extensions.Configuration"              Version="9.0.3" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="9.0.3" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Binder"       Version="9.0.3" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="9.0.3" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Json"         Version="9.0.3" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.UserSecrets"  Version="9.0.3" />
+
+    <!-- Logging -->
+    <PackageVersion Include="Microsoft.Extensions.Logging"                    Version="9.0.3" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions"       Version="9.0.3" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Console"            Version="9.0.3" />
+
+    <!-- Options pattern -->
+    <PackageVersion Include="Microsoft.Extensions.Options"                    Version="9.0.3" />
+    <PackageVersion Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="9.0.3" />
+    <PackageVersion Include="Microsoft.Extensions.Options.DataAnnotations"    Version="9.0.3" />
+
+    <!-- Hosted services / Background processing -->
+    <PackageVersion Include="Microsoft.Extensions.Hosting"                    Version="9.0.3" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions"       Version="9.0.3" />
+
+    <!-- HTTP -->
+    <PackageVersion Include="Microsoft.Extensions.Http"                       Version="9.0.3" />
+
+    <!-- Caching -->
+    <PackageVersion Include="Microsoft.Extensions.Caching.Memory"             Version="9.0.3" />
+    <PackageVersion Include="Microsoft.Extensions.Caching.Abstractions"       Version="9.0.3" />
+  </ItemGroup>
+
+  <ItemGroup Label="ASP.NET Core">
+    <PackageVersion Include="Microsoft.AspNetCore.OpenApi"                    Version="9.0.3" />
+  </ItemGroup>
+
+  <ItemGroup Label="Serialization">
+    <!-- System.Text.Json is included in the SDK; pin for explicit control -->
+    <PackageVersion Include="System.Text.Json"                                Version="9.0.3" />
+  </ItemGroup>
+
+  <ItemGroup Label="Observability">
+    <!-- OpenTelemetry -->
+    <PackageVersion Include="OpenTelemetry"                                   Version="1.11.2" />
+    <PackageVersion Include="OpenTelemetry.Api"                               Version="1.11.2" />
+    <PackageVersion Include="OpenTelemetry.Extensions.Hosting"                Version="1.11.2" />
+    <PackageVersion Include="OpenTelemetry.Exporter.Console"                  Version="1.11.2" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.AspNetCore"        Version="1.11.1" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.Http"              Version="1.11.1" />
+  </ItemGroup>
+
+  <ItemGroup Label="Analyzers">
+    <!-- Referenced as PrivateAssets=all in Directory.Build.props -->
+    <PackageVersion Include="StyleCop.Analyzers"                              Version="1.2.0-beta.556" />
+    <PackageVersion Include="SonarAnalyzers.CSharp"                          Version="10.7.0.110445" />
+  </ItemGroup>
+
+  <ItemGroup Label="Resilience">
+    <!-- Polly for retry / circuit breaker policies -->
+    <PackageVersion Include="Microsoft.Extensions.Http.Resilience"            Version="9.4.0" />
+    <PackageVersion Include="Polly"                                           Version="8.5.2" />
+    <PackageVersion Include="Polly.Extensions"                                Version="8.5.2" />
+  </ItemGroup>
+
+</Project>

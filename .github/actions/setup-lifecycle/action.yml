@@ -1,0 +1,145 @@
+name: Setup dev-lifecycle
+description: >
+  Checks out the dev-lifecycle repository to ~/.dev-lifecycle (or a
+  configurable path) so that lifecycle scripts and module files are available
+  during a CI workflow run.
+
+author: goeke-m
+
+inputs:
+  lifecycle-dir:
+    description: >
+      The directory to check out the lifecycle repo into.
+      Defaults to ~/.dev-lifecycle.
+    required: false
+    default: ''
+
+  lifecycle-ref:
+    description: >
+      The git ref (branch, tag, or SHA) to check out from the lifecycle repo.
+      Defaults to 'main'.
+    required: false
+    default: 'main'
+
+  lifecycle-repo:
+    description: >
+      The GitHub repository containing the lifecycle definitions.
+      Defaults to 'goeke-m/dev-lifecycle'.
+    required: false
+    default: 'goeke-m/dev-lifecycle'
+
+  token:
+    description: >
+      GitHub token used to check out the lifecycle repository.
+      Defaults to the built-in GITHUB_TOKEN (public repo — no token needed).
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  lifecycle-dir:
+    description: 'The absolute path where the lifecycle repo was checked out.'
+    value: ${{ steps.resolve-dir.outputs.lifecycle-dir }}
+
+  lifecycle-sha:
+    description: 'The full commit SHA of the lifecycle repo that was checked out.'
+    value: ${{ steps.get-sha.outputs.sha }}
+
+  lifecycle-sha-short:
+    description: 'The short (7-char) commit SHA of the checked-out lifecycle repo.'
+    value: ${{ steps.get-sha.outputs.sha-short }}
+
+runs:
+  using: composite
+
+  steps:
+    - name: Resolve lifecycle directory
+      id: resolve-dir
+      shell: bash
+      run: |
+        if [ -n "${{ inputs.lifecycle-dir }}" ]; then
+          DIR="${{ inputs.lifecycle-dir }}"
+        else
+          DIR="${HOME}/.dev-lifecycle"
+        fi
+
+        echo "lifecycle-dir=$DIR" >> "$GITHUB_OUTPUT"
+        echo "LIFECYCLE_DIR=$DIR" >> "$GITHUB_ENV"
+        echo "Lifecycle directory: $DIR"
+
+    - name: Cache lifecycle repository
+      id: cache-lifecycle
+      uses: actions/cache@v4
+      with:
+        path: ${{ steps.resolve-dir.outputs.lifecycle-dir }}
+        # Cache key includes the ref so different branches get separate caches
+        key: dev-lifecycle-${{ inputs.lifecycle-ref }}-${{ github.run_id }}
+        restore-keys: |
+          dev-lifecycle-${{ inputs.lifecycle-ref }}-
+          dev-lifecycle-main-
+
+    - name: Checkout dev-lifecycle repository
+      if: steps.cache-lifecycle.outputs.cache-hit != 'true'
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ inputs.lifecycle-repo }}
+        ref: ${{ inputs.lifecycle-ref }}
+        token: ${{ inputs.token }}
+        path: ${{ steps.resolve-dir.outputs.lifecycle-dir }}
+        fetch-depth: 1
+
+    - name: Update cached checkout to target ref
+      if: steps.cache-lifecycle.outputs.cache-hit == 'true'
+      shell: bash
+      run: |
+        LIFECYCLE_DIR="${{ steps.resolve-dir.outputs.lifecycle-dir }}"
+        echo "Using cached lifecycle repo at $LIFECYCLE_DIR"
+        git -C "$LIFECYCLE_DIR" fetch origin "${{ inputs.lifecycle-ref }}" --depth=1 2>/dev/null || true
+        git -C "$LIFECYCLE_DIR" checkout "${{ inputs.lifecycle-ref }}" 2>/dev/null || true
+
+    - name: Get lifecycle commit SHA
+      id: get-sha
+      shell: bash
+      run: |
+        LIFECYCLE_DIR="${{ steps.resolve-dir.outputs.lifecycle-dir }}"
+        SHA=$(git -C "$LIFECYCLE_DIR" rev-parse HEAD 2>/dev/null || echo "unknown")
+        SHA_SHORT=$(git -C "$LIFECYCLE_DIR" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+        echo "sha=$SHA"       >> "$GITHUB_OUTPUT"
+        echo "sha-short=$SHA_SHORT" >> "$GITHUB_OUTPUT"
+        echo "Lifecycle commit: $SHA_SHORT ($SHA)"
+
+    - name: Verify lifecycle repo structure
+      shell: bash
+      run: |
+        LIFECYCLE_DIR="${{ steps.resolve-dir.outputs.lifecycle-dir }}"
+        REQUIRED_PATHS=(
+          "scripts/apply.sh"
+          "scripts/generate-agent.sh"
+          "modules"
+          "agents"
+          "hooks"
+        )
+
+        MISSING=0
+        for path in "${REQUIRED_PATHS[@]}"; do
+          if [ ! -e "$LIFECYCLE_DIR/$path" ]; then
+            echo "::error::Expected lifecycle path not found: $LIFECYCLE_DIR/$path"
+            MISSING=1
+          fi
+        done
+
+        if [ "$MISSING" -eq 1 ]; then
+          echo "::error::The lifecycle repo at $LIFECYCLE_DIR appears incomplete or corrupted."
+          exit 1
+        fi
+
+        echo "Lifecycle repo verified at: $LIFECYCLE_DIR"
+        echo "  SHA: ${{ steps.get-sha.outputs.sha-short }}"
+        echo "  Ref: ${{ inputs.lifecycle-ref }}"
+
+    - name: Make scripts executable
+      shell: bash
+      run: |
+        LIFECYCLE_DIR="${{ steps.resolve-dir.outputs.lifecycle-dir }}"
+        chmod +x "$LIFECYCLE_DIR/scripts/"*.sh
+        chmod +x "$LIFECYCLE_DIR/hooks/"* 2>/dev/null || true
+        echo "Scripts marked as executable."

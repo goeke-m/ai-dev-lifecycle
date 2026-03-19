@@ -1,0 +1,106 @@
+{
+  "$schema": "https://raw.githubusercontent.com/goeke-m/dev-lifecycle/main/schema.json",
+  "project": {
+    "name": "my-awesome-project",
+    "language": "csharp",
+    "description": "An example project using the dev-lifecycle management system."
+  },
+  "modules": {
+    "coding-standards": {
+      "enabled": true,
+      "options": {
+        "editorconfig": true,
+        "buildProps": true,
+        "lintConfig": true
+      }
+    },
+    "scaffolding": {
+      "enabled": true,
+      "options": {
+        "centralPackageManagement": true,
+        "basePackageJson": true
+      }
+    },
+    "pr-workflows": {
+      "enabled": true,
+      "options": {
+        "pullRequestTemplate": true
+      }
+    },
+    "testing": {
+      "enabled": true,
+      "options": {
+        "coverageSettings": true,
+        "vitestConfig": true
+      }
+    },
+    "documentation": {
+      "enabled": true,
+      "options": {
+        "readme": true,
+        "adr": true,
+        "changelog": true
+      }
+    }
+  },
+  "hooks": {
+    "pre-commit": {
+      "enabled": true
+    },
+    "commit-msg": {
+      "enabled": true
+    }
+  },
+  "agents": {
+    "claude": {
+      "enabled": true,
+      "rules": [
+        "git-commits",
+        "pr-standards",
+        "testing",
+        "csharp-conventions"
+      ]
+    },
+    "copilot": {
+      "enabled": true,
+      "rules": [
+        "git-commits",
+        "pr-standards",
+        "testing",
+        "csharp-conventions"
+      ]
+    },
+    "cursor": {
+      "enabled": false,
+      "rules": [
+        "git-commits",
+        "pr-standards",
+        "testing",
+        "csharp-conventions"
+      ]
+    }
+  },
+  "ci": {
+    "github": {
+      "enabled": true,
+      "workflows": {
+        "build": true,
+        "test": true,
+        "prCheck": true,
+        "lifecycleUpdate": true
+      },
+      "inputs": {
+        "dotnetVersion": "9.0.x",
+        "nodeVersion": "22",
+        "packageManager": "npm",
+        "configuration": "Release",
+        "projectPath": "src/MyProject/MyProject.csproj"
+      }
+    }
+  },
+  "update": {
+    "autoUpdate": true,
+    "schedule": "daily",
+    "createPrOnDrift": true
+  }
+}

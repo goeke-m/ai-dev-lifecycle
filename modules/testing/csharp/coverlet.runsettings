@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!--
+  coverlet.runsettings — Code coverage settings for dotnet test + Coverlet
+  Managed by dev-lifecycle (https://github.com/goeke-m/dev-lifecycle)
+
+  Usage:
+    dotnet test --settings coverlet.runsettings
+    dotnet test --settings coverlet.runsettings --collect:"XPlat Code Coverage"
+
+  Documentation: https://github.com/coverlet-coverage/coverlet/blob/master/Documentation/MSBuildIntegration.md
+-->
+<RunSettings>
+
+  <!-- ── Test run configuration ───────────────────────────────────────────── -->
+  <RunConfiguration>
+    <!-- Maximum time (ms) a single test can run before being aborted -->
+    <TestSessionTimeout>300000</TestSessionTimeout>
+    <!-- Default timeout per test (30 seconds) -->
+    <MapCpuCount>0</MapCpuCount>
+  </RunConfiguration>
+
+  <!-- ── Data Collectors ──────────────────────────────────────────────────── -->
+  <DataCollectionRunSettings>
+    <DataCollectors>
+      <DataCollector friendlyName="XPlat Code Coverage">
+        <Configuration>
+
+          <!-- ── Output format ──────────────────────────────────────────────── -->
+          <!--
+            Cobertura is the standard for most CI systems (GitHub Actions,
+            Azure DevOps, SonarCloud, Codecov, Coveralls).
+            Multiple formats can be comma-separated: cobertura,json,lcov
+          -->
+          <Format>cobertura</Format>
+
+          <!-- Output directory (relative to test project) -->
+          <OutputDirectory>./TestResults/coverage</OutputDirectory>
+
+          <!-- ── Exclusions ───────────────────────────────────────────────── -->
+          <!-- Exclude test projects themselves from coverage metrics -->
+          <ExcludeByFile>
+            <!-- Test files -->
+            **/*.Tests/**/*.cs,
+            **/*.Test/**/*.cs,
+            **/*Tests.cs,
+            **/*Test.cs,
+            <!-- Auto-generated code (EF migrations, protobuf, etc.) -->
+            **/Migrations/**/*.cs,
+            **/obj/**/*.cs,
+            **/*.g.cs,
+            **/*.generated.cs,
+            **/*.Designer.cs,
+            <!-- Program entry point — typically trivial to cover -->
+            **/Program.cs
+          </ExcludeByFile>
+
+          <!-- Exclude by assembly name -->
+          <ExcludeByAttribute>
+            <!-- Standard generated-code attributes -->
+            GeneratedCode,
+            CompilerGenerated,
+            <!-- Exclude code tagged with [ExcludeFromCodeCoverage] -->
+            ExcludeFromCodeCoverage,
+            <!-- Exclude benchmark projects -->
+            MemoryDiagnoser,
+            SimpleJob
+          </ExcludeByAttribute>
+
+          <!-- Exclude assemblies by name pattern -->
+          <Exclude>
+            [*.Tests]*,
+            [*.Test]*,
+            [*Tests]*,
+            [*Test]*,
+            [*Benchmarks]*,
+            [*Migrations]*
+          </Exclude>
+
+          <!-- ── Coverage thresholds ─────────────────────────────────────── -->
+          <!--
+            Failing thresholds cause dotnet test to exit with a non-zero code.
+            Line coverage: the most commonly reported metric.
+            Branch coverage: ensures conditional paths are exercised.
+          -->
+          <Threshold>80</Threshold>
+          <ThresholdType>line</ThresholdType>
+          <ThresholdStat>total</ThresholdStat>
+
+          <!-- ── Merging runs ──────────────────────────────────────────────── -->
+          <!--
+            When running tests across multiple test projects, merge the results
+            into a single report file.
+          -->
+          <MergeWith>/tmp/dev-lifecycle-coverage/coverage.json</MergeWith>
+
+          <!-- ── Instrumentation ──────────────────────────────────────────── -->
+          <!-- Include branch coverage data -->
+          <IncludeTestAssembly>false</IncludeTestAssembly>
+          <SingleHit>false</SingleHit>
+          <UseSourceLink>true</UseSourceLink>
+
+        </Configuration>
+      </DataCollector>
+    </DataCollectors>
+  </DataCollectionRunSettings>
+
+  <!-- ── Logger ───────────────────────────────────────────────────────────── -->
+  <LoggerRunSettings>
+    <Loggers>
+      <!-- Console output for CI -->
+      <Logger friendlyName="console" enabled="true">
+        <Configuration>
+          <Verbosity>normal</Verbosity>
+        </Configuration>
+      </Logger>
+      <!-- TRX report for Azure DevOps / other test reporters -->
+      <Logger friendlyName="trx" enabled="false">
+        <Configuration>
+          <LogFileName>test-results.trx</LogFileName>
+        </Configuration>
+      </Logger>
+    </Loggers>
+  </LoggerRunSettings>
+
+</RunSettings>

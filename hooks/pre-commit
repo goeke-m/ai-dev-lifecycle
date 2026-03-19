@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# -----------------------------------------------------------------------------
+# pre-commit hook — Lint staged files before commit
+#
+# Managed by dev-lifecycle (https://github.com/goeke-m/dev-lifecycle)
+# Do not edit manually — regenerate via apply.sh
+# -----------------------------------------------------------------------------
+
+STAGED_FILES="$(git diff --cached --name-only --diff-filter=ACMR)"
+
+if [[ -z "$STAGED_FILES" ]]; then
+  echo "[pre-commit] No staged files — skipping lint checks."
+  exit 0
+fi
+
+echo "[pre-commit] Checking staged files..."
+
+# ── TypeScript / JavaScript: lint-staged ─────────────────────────────────────
+# Detect package.json with lint-staged configuration
+if [[ -f "package.json" ]]; then
+  HAS_LINT_STAGED="$(node -e "
+    try {
+      const pkg = require('./package.json');
+      const hasConfig = pkg['lint-staged'] || pkg.scripts?.['lint-staged'];
+      process.stdout.write(hasConfig ? 'true' : 'false');
+    } catch (e) {
+      process.stdout.write('false');
+    }
+  " 2>/dev/null || echo "false")"
+
+  if [[ "$HAS_LINT_STAGED" == "true" ]]; then
+    STAGED_JS_TS="$(echo "$STAGED_FILES" | grep -E '\.(js|jsx|ts|tsx|mjs|cjs)$' || true)"
+    if [[ -n "$STAGED_JS_TS" ]]; then
+      echo "[pre-commit] Running lint-staged..."
+
+      if command -v npx &>/dev/null; then
+        npx lint-staged
+        echo "[pre-commit] lint-staged passed."
+      else
+        echo "[pre-commit] [warn] npx not found — skipping lint-staged."
+      fi
+    else
+      echo "[pre-commit] No staged JS/TS files — skipping lint-staged."
+    fi
+  fi
+fi
+
+# ── C#: dotnet format ────────────────────────────────────────────────────────
+# Detect C# project by presence of a .sln or .csproj file
+CSHARP_PROJECT_FILES="$(find . -maxdepth 3 \( -name '*.sln' -o -name '*.csproj' \) 2>/dev/null | head -1 || true)"
+
+if [[ -n "$CSHARP_PROJECT_FILES" ]]; then
+  STAGED_CS="$(echo "$STAGED_FILES" | grep -E '\.cs$' || true)"
+
+  if [[ -z "$STAGED_CS" ]]; then
+    echo "[pre-commit] No staged .cs files — skipping dotnet format."
+  else
+    if ! command -v dotnet &>/dev/null; then
+      echo "[pre-commit] [warn] 'dotnet' not found — skipping dotnet format check."
+      exit 0
+    fi
+
+    echo "[pre-commit] Running dotnet format on staged C# files..."
+
+    # Build the space-separated list of staged .cs files for --include
+    INCLUDE_FILES="$(echo "$STAGED_CS" | tr '\n' ' ' | sed 's/ *$//')"
+
+    # dotnet format --verify-no-changes exits non-zero if formatting is needed
+    if dotnet format --verify-no-changes --include $INCLUDE_FILES 2>&1; then
+      echo "[pre-commit] dotnet format: no issues found."
+    else
+      echo ""
+      echo "[pre-commit] [error] Code formatting issues detected in staged C# files."
+      echo "[pre-commit] Run the following command to auto-fix formatting, then re-stage:"
+      echo ""
+      echo "    dotnet format --include $INCLUDE_FILES"
+      echo ""
+      exit 1
+    fi
+  fi
+fi
+
+echo "[pre-commit] All checks passed."

@@ -1,0 +1,124 @@
+name: Build TypeScript
+
+# Reusable workflow — call from consuming repos:
+#
+#   jobs:
+#     build:
+#       uses: goeke-m/dev-lifecycle/.github/workflows/build-typescript.yml@main
+#       with:
+#         node-version: '22'
+#         package-manager: 'npm'
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: 'The Node.js version to use (e.g., 22, 22.x, lts/*)'
+        type: string
+        default: '22'
+        required: false
+
+      package-manager:
+        description: 'Package manager to use: npm, pnpm, or yarn'
+        type: string
+        default: 'npm'
+        required: false
+
+      build-command:
+        description: 'The build script to run'
+        type: string
+        default: 'build'
+        required: false
+
+      typecheck-command:
+        description: 'The typecheck script to run'
+        type: string
+        default: 'typecheck'
+        required: false
+
+      lint-command:
+        description: 'The lint script to run'
+        type: string
+        default: 'lint'
+        required: false
+
+      upload-artifacts:
+        description: 'Whether to upload build artifacts'
+        type: boolean
+        default: true
+        required: false
+
+      artifact-name:
+        description: 'Name for the uploaded artifact'
+        type: string
+        default: 'build-output'
+        required: false
+
+      artifact-path:
+        description: 'Path to the directory to upload as an artifact'
+        type: string
+        default: 'dist'
+        required: false
+
+    outputs:
+      artifact-name:
+        description: 'The name of the uploaded build artifact'
+        value: ${{ jobs.build.outputs.artifact-name }}
+
+jobs:
+  build:
+    name: Build (Node ${{ inputs.node-version }})
+    runs-on: ubuntu-latest
+    outputs:
+      artifact-name: ${{ inputs.artifact-name }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js ${{ inputs.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: ${{ inputs.package-manager }}
+
+      - name: Set up pnpm
+        if: ${{ inputs.package-manager == 'pnpm' }}
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Install dependencies (npm)
+        if: ${{ inputs.package-manager == 'npm' }}
+        run: npm ci
+
+      - name: Install dependencies (pnpm)
+        if: ${{ inputs.package-manager == 'pnpm' }}
+        run: pnpm install --frozen-lockfile
+
+      - name: Install dependencies (yarn)
+        if: ${{ inputs.package-manager == 'yarn' }}
+        run: yarn install --immutable
+
+      - name: Type check
+        run: ${{ inputs.package-manager }} run ${{ inputs.typecheck-command }}
+        continue-on-error: false
+
+      - name: Lint
+        run: ${{ inputs.package-manager }} run ${{ inputs.lint-command }}
+
+      - name: Check formatting
+        run: ${{ inputs.package-manager }} run format:check
+        continue-on-error: true # Formatting is a warning, not a build failure
+
+      - name: Build
+        run: ${{ inputs.package-manager }} run ${{ inputs.build-command }}
+
+      - name: Upload build artifacts
+        if: ${{ inputs.upload-artifacts }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: ${{ inputs.artifact-path }}
+          retention-days: 7
+          if-no-files-found: error

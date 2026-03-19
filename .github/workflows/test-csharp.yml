@@ -1,0 +1,185 @@
+name: Test C#
+
+# Reusable workflow — call from consuming repos:
+#
+#   jobs:
+#     test:
+#       uses: goeke-m/dev-lifecycle/.github/workflows/test-csharp.yml@main
+#       with:
+#         dotnet-version: '9.0.x'
+#         project-path: 'tests/MyProject.Tests/MyProject.Tests.csproj'
+
+on:
+  workflow_call:
+    inputs:
+      dotnet-version:
+        description: 'The .NET SDK version to use (e.g., 9.0.x)'
+        type: string
+        default: '9.0.x'
+        required: false
+
+      project-path:
+        description: >
+          Path to the test .csproj or the solution .sln to run tests from.
+          Defaults to the current directory (runs all test projects).
+        type: string
+        default: ''
+        required: false
+
+      configuration:
+        description: 'Build configuration (Debug or Release)'
+        type: string
+        default: 'Release'
+        required: false
+
+      runsettings-path:
+        description: 'Path to the .runsettings file for coverage configuration'
+        type: string
+        default: 'coverlet.runsettings'
+        required: false
+
+      coverage-threshold:
+        description: 'Minimum line coverage percentage (0–100). Set to 0 to disable threshold check.'
+        type: number
+        default: 80
+        required: false
+
+      upload-coverage:
+        description: 'Whether to upload coverage reports as artifacts'
+        type: boolean
+        default: true
+        required: false
+
+    outputs:
+      coverage-report-path:
+        description: 'Path to the uploaded coverage report artifact'
+        value: ${{ jobs.test.outputs.coverage-path }}
+
+jobs:
+  test:
+    name: Test (.NET ${{ inputs.dotnet-version }})
+    runs-on: ubuntu-latest
+    outputs:
+      coverage-path: coverage-report
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET ${{ inputs.dotnet-version }}
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/Directory.Packages.props') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-
+
+      - name: Restore dependencies
+        run: dotnet restore ${{ inputs.project-path }}
+        env:
+          DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+
+      - name: Build (test projects only)
+        run: |
+          dotnet build ${{ inputs.project-path }} \
+            --no-restore \
+            --configuration ${{ inputs.configuration }}
+        env:
+          DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+
+      - name: Run tests with coverage
+        id: run-tests
+        run: |
+          SETTINGS_ARG=""
+          if [ -f "${{ inputs.runsettings-path }}" ]; then
+            SETTINGS_ARG="--settings ${{ inputs.runsettings-path }}"
+          fi
+
+          dotnet test ${{ inputs.project-path }} \
+            --no-build \
+            --configuration ${{ inputs.configuration }} \
+            $SETTINGS_ARG \
+            --collect:"XPlat Code Coverage" \
+            --results-directory TestResults \
+            --logger "console;verbosity=normal" \
+            --logger "trx;LogFileName=test-results.trx" \
+            -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
+        env:
+          DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+
+      - name: Merge coverage reports
+        if: always()
+        run: |
+          # Install ReportGenerator to merge and convert coverage reports
+          dotnet tool install --global dotnet-reportgenerator-globaltool --version 5.3.11 2>/dev/null || true
+
+          COVERAGE_FILES="$(find TestResults -name 'coverage.cobertura.xml' | tr '\n' ';')"
+
+          if [ -z "$COVERAGE_FILES" ]; then
+            echo "No coverage files found — skipping report generation"
+            exit 0
+          fi
+
+          reportgenerator \
+            "-reports:${COVERAGE_FILES%%;}" \
+            "-targetdir:coverage-report" \
+            "-reporttypes:Cobertura;HtmlInline_AzurePipelines;TextSummary;lcov" \
+            "-verbosity:Warning"
+
+          echo "Coverage summary:"
+          cat coverage-report/Summary.txt || true
+        env:
+          PATH: "$PATH:$HOME/.dotnet/tools"
+
+      - name: Enforce coverage threshold
+        if: always() && inputs.coverage-threshold > 0
+        run: |
+          if [ ! -f coverage-report/Cobertura.xml ]; then
+            echo "No merged coverage report found — skipping threshold check"
+            exit 0
+          fi
+
+          LINE_RATE=$(xmllint --xpath 'string(/coverage/@line-rate)' coverage-report/Cobertura.xml 2>/dev/null || echo "0")
+          PERCENTAGE=$(echo "$LINE_RATE * 100" | bc -l | xargs printf "%.1f")
+          THRESHOLD="${{ inputs.coverage-threshold }}"
+
+          echo "Line coverage: ${PERCENTAGE}% (threshold: ${THRESHOLD}%)"
+
+          if (( $(echo "$PERCENTAGE < $THRESHOLD" | bc -l) )); then
+            echo "::error::Coverage ${PERCENTAGE}% is below the required threshold of ${THRESHOLD}%"
+            exit 1
+          fi
+
+          echo "Coverage threshold met."
+
+      - name: Upload coverage report
+        if: always() && inputs.upload-coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage-report/
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: TestResults/
+          retention-days: 7
+          if-no-files-found: warn
+
+      - name: Publish test results to GitHub
+        if: always()
+        uses: dorny/test-reporter@v1
+        with:
+          name: '.NET Test Results'
+          path: 'TestResults/**/*.trx'
+          reporter: dotnet-trx
+          fail-on-error: false

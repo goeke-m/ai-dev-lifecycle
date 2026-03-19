@@ -1,0 +1,299 @@
+name: Lifecycle Update Check
+
+# Reusable workflow — consuming repos call this on a schedule or on push to
+# check whether lifecycle-managed files have drifted from the canonical source.
+# If drift is detected, a PR is automatically created.
+#
+# Usage in a consuming repo:
+#
+#   on:
+#     schedule:
+#       - cron: '0 9 * * 1'   # Every Monday at 9am UTC
+#     workflow_dispatch:
+#
+#   jobs:
+#     lifecycle-update:
+#       uses: goeke-m/dev-lifecycle/.github/workflows/lifecycle-update.yml@main
+#       with:
+#         project-language: csharp
+#         enabled-modules: 'coding-standards,pr-workflows,testing'
+#         enabled-agents: 'claude,copilot'
+#       secrets:
+#         LIFECYCLE_UPDATE_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+on:
+  workflow_call:
+    inputs:
+      project-language:
+        description: 'Language of the consuming project: csharp or typescript'
+        type: string
+        required: true
+
+      enabled-modules:
+        description: 'Comma-separated list of enabled modules to check'
+        type: string
+        default: 'coding-standards,pr-workflows,testing,documentation'
+        required: false
+
+      enabled-agents:
+        description: 'Comma-separated list of enabled agents to regenerate'
+        type: string
+        default: 'claude,copilot'
+        required: false
+
+      lifecycle-ref:
+        description: 'The git ref (branch/tag) of the lifecycle repo to pull from'
+        type: string
+        default: 'main'
+        required: false
+
+      pr-branch-prefix:
+        description: 'Prefix for the branch created when drift is detected'
+        type: string
+        default: 'chore/lifecycle-update'
+        required: false
+
+      config-file:
+        description: 'Path to the .devlifecycle.json config in the consuming repo'
+        type: string
+        default: '.devlifecycle.json'
+        required: false
+
+    secrets:
+      LIFECYCLE_UPDATE_TOKEN:
+        description: >
+          GitHub token with permission to create branches and pull requests
+          in the consuming repository. Defaults to the built-in GITHUB_TOKEN.
+        required: false
+
+jobs:
+  check-and-update:
+    name: Check lifecycle drift and create PR if needed
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout consuming repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.LIFECYCLE_UPDATE_TOKEN || secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Set up lifecycle repo
+        uses: goeke-m/dev-lifecycle/.github/actions/setup-lifecycle@main
+        with:
+          lifecycle-ref: ${{ inputs.lifecycle-ref }}
+
+      - name: Determine lifecycle version
+        id: lifecycle-version
+        run: |
+          LIFECYCLE_DIR="${HOME}/.dev-lifecycle"
+          SHA=$(git -C "$LIFECYCLE_DIR" rev-parse --short HEAD)
+          DATE=$(git -C "$LIFECYCLE_DIR" log -1 --format='%ci' | cut -d' ' -f1)
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "date=$DATE" >> "$GITHUB_OUTPUT"
+          echo "Lifecycle version: $SHA ($DATE)"
+
+      - name: Check for drift in managed files
+        id: drift-check
+        env:
+          LIFECYCLE_DIR: ${{ env.LIFECYCLE_DIR }}
+          LANGUAGE: ${{ inputs.project-language }}
+          ENABLED_MODULES: ${{ inputs.enabled-modules }}
+        run: |
+          DRIFT=0
+          DRIFT_DETAILS=""
+
+          IFS=',' read -ra MODULES <<< "$ENABLED_MODULES"
+          for module in "${MODULES[@]}"; do
+            module="${module// /}"  # trim spaces
+            echo "Checking module: $module"
+
+            case "$module" in
+              pr-workflows)
+                SRC="$LIFECYCLE_DIR/modules/pr-workflows/github/PULL_REQUEST_TEMPLATE.md"
+                DST=".github/PULL_REQUEST_TEMPLATE.md"
+                ;;
+              documentation)
+                # Check each template individually
+                for tmpl in README.md ADR.md CHANGELOG.md; do
+                  SRC="$LIFECYCLE_DIR/modules/documentation/templates/$tmpl"
+                  DST="docs/templates/$tmpl"
+                  if [ -f "$DST" ] && [ -f "$SRC" ]; then
+                    if ! diff -q "$SRC" "$DST" >/dev/null 2>&1; then
+                      DRIFT=1
+                      DRIFT_DETAILS="${DRIFT_DETAILS}\n  - $DST (documentation/$tmpl)"
+                    fi
+                  fi
+                done
+                continue
+                ;;
+              *)
+                # Check all files in the module/language directory
+                MODULE_SRC="$LIFECYCLE_DIR/modules/$module/$LANGUAGE"
+                if [ -d "$MODULE_SRC" ]; then
+                  while IFS= read -r -d '' src_file; do
+                    rel="${src_file#$MODULE_SRC/}"
+                    DST_FILE="./$rel"
+                    if [ -f "$DST_FILE" ]; then
+                      # Resolve symlinks before comparing
+                      REAL_SRC="$(readlink -f "$src_file")"
+                      REAL_DST="$(readlink -f "$DST_FILE" 2>/dev/null || echo "$DST_FILE")"
+                      if [ "$REAL_SRC" != "$REAL_DST" ]; then
+                        if ! diff -q "$REAL_SRC" "$DST_FILE" >/dev/null 2>&1; then
+                          DRIFT=1
+                          DRIFT_DETAILS="${DRIFT_DETAILS}\n  - $DST_FILE ($module/$rel)"
+                        fi
+                      fi
+                    fi
+                  done < <(find "$MODULE_SRC" -maxdepth 1 -type f -print0)
+                fi
+                continue
+                ;;
+            esac
+
+            if [ -f "$DST" ] && [ -f "$SRC" ]; then
+              REAL_SRC="$(readlink -f "$SRC")"
+              REAL_DST="$(readlink -f "$DST" 2>/dev/null || echo "$DST")"
+              if [ "$REAL_SRC" != "$REAL_DST" ]; then
+                if ! diff -q "$REAL_SRC" "$DST" >/dev/null 2>&1; then
+                  DRIFT=1
+                  DRIFT_DETAILS="${DRIFT_DETAILS}\n  - $DST ($module)"
+                fi
+              fi
+            fi
+          done
+
+          echo "drift=$DRIFT" >> "$GITHUB_OUTPUT"
+          echo "drift-details<<EOF" >> "$GITHUB_OUTPUT"
+          printf '%b\n' "$DRIFT_DETAILS" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+          if [ "$DRIFT" -eq 1 ]; then
+            echo "::notice::Lifecycle drift detected in the following files:"
+            printf '%b\n' "$DRIFT_DETAILS"
+          else
+            echo "No lifecycle drift detected."
+          fi
+
+      - name: Install jq
+        if: steps.drift-check.outputs.drift == '1'
+        run: sudo apt-get install -y --no-install-recommends jq
+
+      - name: Regenerate managed files
+        if: steps.drift-check.outputs.drift == '1'
+        env:
+          LIFECYCLE_DIR: ${{ env.LIFECYCLE_DIR }}
+          ENABLED_AGENTS: ${{ inputs.enabled-agents }}
+          CONFIG_FILE: ${{ inputs.config-file }}
+        run: |
+          IFS=',' read -ra AGENTS <<< "$ENABLED_AGENTS"
+          for agent in "${AGENTS[@]}"; do
+            agent="${agent// /}"
+            if [ -f "$CONFIG_FILE" ]; then
+              ENABLED=$(jq -r ".agents[\"$agent\"].enabled // false" "$CONFIG_FILE")
+              if [ "$ENABLED" = "true" ]; then
+                echo "Regenerating agent: $agent"
+                bash "$LIFECYCLE_DIR/scripts/generate-agent.sh" "$agent" "$(pwd)" "$CONFIG_FILE"
+              fi
+            fi
+          done
+
+          # Re-sync module files (copy updated source over managed files)
+          IFS=',' read -ra MODULES <<< "${{ inputs.enabled-modules }}"
+          LANGUAGE="${{ inputs.project-language }}"
+
+          for module in "${MODULES[@]}"; do
+            module="${module// /}"
+            case "$module" in
+              pr-workflows)
+                cp "$LIFECYCLE_DIR/modules/pr-workflows/github/PULL_REQUEST_TEMPLATE.md" \
+                   ".github/PULL_REQUEST_TEMPLATE.md" 2>/dev/null || true
+                ;;
+              documentation)
+                mkdir -p docs/templates
+                cp "$LIFECYCLE_DIR/modules/documentation/templates/"* docs/templates/ 2>/dev/null || true
+                ;;
+              *)
+                MODULE_SRC="$LIFECYCLE_DIR/modules/$module/$LANGUAGE"
+                if [ -d "$MODULE_SRC" ]; then
+                  cp "$MODULE_SRC/"* . 2>/dev/null || true
+                fi
+                ;;
+            esac
+          done
+
+      - name: Create update PR
+        if: steps.drift-check.outputs.drift == '1'
+        env:
+          GH_TOKEN: ${{ secrets.LIFECYCLE_UPDATE_TOKEN || secrets.GITHUB_TOKEN }}
+          LIFECYCLE_SHA: ${{ steps.lifecycle-version.outputs.sha }}
+          LIFECYCLE_DATE: ${{ steps.lifecycle-version.outputs.date }}
+          BRANCH_PREFIX: ${{ inputs.pr-branch-prefix }}
+          DRIFT_DETAILS: ${{ steps.drift-check.outputs.drift-details }}
+        run: |
+          BRANCH="${BRANCH_PREFIX}-${LIFECYCLE_SHA}"
+
+          # Check if a PR for this lifecycle version already exists
+          EXISTING_PR=$(gh pr list \
+            --head "$BRANCH" \
+            --state open \
+            --json number \
+            --jq '.[0].number' 2>/dev/null || echo "")
+
+          if [ -n "$EXISTING_PR" ]; then
+            echo "PR already exists for this lifecycle version: #$EXISTING_PR"
+            exit 0
+          fi
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git checkout -b "$BRANCH"
+          git add -A
+          git commit -m "chore(lifecycle): sync with dev-lifecycle@${LIFECYCLE_SHA}
+
+Automatically generated by the lifecycle-update workflow.
+Lifecycle source: https://github.com/goeke-m/dev-lifecycle
+Lifecycle commit: ${LIFECYCLE_SHA} (${LIFECYCLE_DATE})"
+
+          git push origin "$BRANCH"
+
+          gh pr create \
+            --title "chore(lifecycle): sync with dev-lifecycle@${LIFECYCLE_SHA}" \
+            --body "$(cat <<EOF
+## Summary
+
+Automatic lifecycle update to sync managed files with [dev-lifecycle](https://github.com/goeke-m/dev-lifecycle) @ \`${LIFECYCLE_SHA}\` (${LIFECYCLE_DATE}).
+
+## Files changed
+
+The following lifecycle-managed files had drifted from the canonical source:
+
+${DRIFT_DETAILS}
+
+## What to do
+
+1. Review the diff — verify that the updated files look correct for your project
+2. If any changes are project-specific overrides that should be preserved, discuss with the team whether they should be contributed back to the lifecycle repo or handled differently
+3. Approve and squash-merge this PR
+
+## Auto-generated
+
+This PR was created automatically by the \`lifecycle-update\` reusable workflow.
+Do not edit the changed files manually — instead, contribute improvements back to
+[goeke-m/dev-lifecycle](https://github.com/goeke-m/dev-lifecycle).
+EOF
+)" \
+            --label "lifecycle,automated" \
+            --base main \
+            --head "$BRANCH" || true
+
+          echo "::notice::Created lifecycle update PR for branch $BRANCH"
+
+      - name: Report no drift
+        if: steps.drift-check.outputs.drift == '0'
+        run: |
+          echo "Lifecycle files are up-to-date with dev-lifecycle@${{ steps.lifecycle-version.outputs.sha }}."
