@@ -62,7 +62,8 @@
         "dotnet-architecture",
         "security",
         "performance-testing",
-        "database-schema"
+        "database-schema",
+        "data-practices"
       ]
     },
     "copilot": {
@@ -75,7 +76,8 @@
         "dotnet-architecture",
         "security",
         "performance-testing",
-        "database-schema"
+        "database-schema",
+        "data-practices"
       ]
     },
     "cursor": {
@@ -88,7 +90,8 @@
         "dotnet-architecture",
         "security",
         "performance-testing",
-        "database-schema"
+        "database-schema",
+        "data-practices"
       ]
     }
   },
