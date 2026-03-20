@@ -187,6 +187,130 @@ For single-service apps, still use `ServiceDefaults` if OpenTelemetry and health
 
 ---
 
+## Prefer Smart Enums over plain C# enums
+
+Plain `enum` types lack behaviour, are stringly-typed at the boundary, and cannot be extended
+without breaking switch exhaustiveness. Use the Smart Enum pattern — an enumeration class that
+encapsulates value, display name, and domain behaviour — instead.
+
+Prefer the [Ardalis.SmartEnum](https://github.com/ardalis/SmartEnum) NuGet package rather than
+rolling the base class from scratch.
+
+### Define smart enums with Ardalis.SmartEnum
+
+```csharp
+// Good — behaviour lives with the value
+public sealed class OrderStatus : SmartEnum<OrderStatus>
+{
+    public static readonly OrderStatus Pending    = new(nameof(Pending),    1);
+    public static readonly OrderStatus Processing = new(nameof(Processing), 2);
+    public static readonly OrderStatus Shipped    = new(nameof(Shipped),    3);
+    public static readonly OrderStatus Delivered  = new(nameof(Delivered),  4);
+    public static readonly OrderStatus Cancelled  = new(nameof(Cancelled),  5);
+
+    private OrderStatus(string name, int value) : base(name, value) { }
+
+    public virtual bool CanTransitionTo(OrderStatus next) =>
+        (this == Pending    && next == Processing) ||
+        (this == Processing && next == Shipped)    ||
+        (this == Shipped    && next == Delivered)  ||
+        (this             != Cancelled && next == Cancelled);
+}
+
+// Bad — behaviour must live elsewhere; invalid values possible at runtime
+public enum OrderStatus { Pending = 1, Processing = 2, Shipped = 3, Delivered = 4, Cancelled = 5 }
+```
+
+### Add domain behaviour directly to the smart enum
+
+```csharp
+public sealed class PaymentMethod : SmartEnum<PaymentMethod>
+{
+    public static readonly PaymentMethod Card        = new(nameof(Card),        1, surchargeRate: 0m);
+    public static readonly PaymentMethod BankTransfer = new(nameof(BankTransfer), 2, surchargeRate: 0m);
+    public static readonly PaymentMethod CryptoCurrency = new(nameof(CryptoCurrency), 3, surchargeRate: 0.02m);
+
+    public decimal SurchargeRate { get; }
+
+    private PaymentMethod(string name, int value, decimal surchargeRate)
+        : base(name, value)
+    {
+        SurchargeRate = surchargeRate;
+    }
+
+    public decimal CalculateSurcharge(decimal amount) => amount * SurchargeRate;
+}
+
+// Usage — no switch, no external mapping table
+var surcharge = order.PaymentMethod.CalculateSurcharge(order.Total);
+```
+
+### Use SmartFlagEnum for flags
+
+```csharp
+public sealed class Permission : SmartFlagEnum<Permission>
+{
+    public static readonly Permission None    = new(nameof(None),    0);
+    public static readonly Permission Read    = new(nameof(Read),    1);
+    public static readonly Permission Write   = new(nameof(Write),   2);
+    public static readonly Permission Delete  = new(nameof(Delete),  4);
+    public static readonly Permission Admin   = new(nameof(Admin),   8);
+    public static readonly Permission Full    = new(nameof(Full),    Read | Write | Delete | Admin);
+
+    private Permission(string name, int value) : base(name, value) { }
+}
+
+// Usage
+var userPermissions = Permission.Read | Permission.Write;
+bool canDelete = userPermissions.HasFlag(Permission.Delete); // false
+```
+
+### Parse from external values safely
+
+```csharp
+// From a database value or API payload — never cast an int directly
+if (!OrderStatus.TryFromValue(rawValue, out var status))
+    throw new InvalidOperationException($"Unknown order status value: {rawValue}");
+
+// From a name (e.g., JSON string)
+var status = OrderStatus.FromName("Shipped");
+```
+
+### Serialise smart enums as their value or name
+
+Configure JSON serialisation once at the composition root:
+
+```csharp
+// Store/transport as integer value
+builder.Services.AddControllers()
+    .AddJsonOptions(o =>
+        o.JsonSerializerOptions.Converters.Add(new SmartEnumValueConverter<OrderStatus, int>()));
+
+// Or as string name (more readable in APIs)
+builder.Services.AddControllers()
+    .AddJsonOptions(o =>
+        o.JsonSerializerOptions.Converters.Add(new SmartEnumNameConverter<OrderStatus, int>()));
+```
+
+For EF Core, map to the underlying primitive:
+
+```csharp
+// Fluent API
+builder.Property(o => o.Status)
+    .HasConversion(s => s.Value, v => OrderStatus.FromValue(v));
+```
+
+### When plain enums are acceptable
+
+- Simple flags with no behaviour and no external serialisation (e.g., internal switch in a single method)
+- Interop with external libraries that require a plain `enum`
+- Performance-critical hot paths where allocation from a class instance matters
+
+In all other cases — especially domain model types that cross a persistence or API boundary —
+prefer smart enums.
+
+---
+
 ## Prefer the Query Specification Pattern for data access
 
 Encapsulate query logic in specification objects rather than proliferating repository methods
