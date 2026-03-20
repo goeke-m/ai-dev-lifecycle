@@ -61,7 +61,8 @@
         "csharp-conventions",
         "dotnet-architecture",
         "security",
-        "performance-testing"
+        "performance-testing",
+        "database-schema"
       ]
     },
     "copilot": {
@@ -73,7 +74,8 @@
         "csharp-conventions",
         "dotnet-architecture",
         "security",
-        "performance-testing"
+        "performance-testing",
+        "database-schema"
       ]
     },
     "cursor": {
@@ -85,7 +87,8 @@
         "csharp-conventions",
         "dotnet-architecture",
         "security",
-        "performance-testing"
+        "performance-testing",
+        "database-schema"
       ]
     }
   },
