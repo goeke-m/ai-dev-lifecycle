@@ -217,6 +217,11 @@ jobs:
 
 ## Troubleshooting
 
+For a full troubleshooting reference covering setup, hooks, agent generation, CI/CD,
+and Windows-specific issues, see [docs/troubleshooting.md](troubleshooting.md).
+
+Common quick fixes:
+
 ### `apply.sh` says jq is not installed
 
 ```bash
